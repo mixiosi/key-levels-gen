@@ -102,13 +102,13 @@ app.layout = dbc.Container([
     [State('symbol-input', 'value'),
      State('duration-input', 'value'),
      State('barsize-input', 'value'),
-     State('sr-confidence-slider', 'value')], # Add slider value as State
+     State('sr-confidence-slider', 'value')],
     prevent_initial_call=True
 )
 def update_chart_on_fetch(n_clicks: int, symbol: str, duration: str, bar_size: str, sr_threshold: float) -> Tuple:
     """
     Callback triggered when the fetch button is clicked.
-    Fetches data, calculates ML-filtered S/R, creates chart.
+    Fetches data, calculates ML-filtered S/R, creates chart with non-overlapping labels.
     """
     triggered_id = dash.callback_context.triggered_id
     if not triggered_id or triggered_id != 'fetch-button':
@@ -129,6 +129,7 @@ def update_chart_on_fetch(n_clicks: int, symbol: str, duration: str, bar_size: s
         connector = IBConnector()
 
         async def fetch_async():
+            # ... (connection and fetch logic remains the same) ...
             if not await connector.connect():
                 raise ConnectionError("Failed to connect to TWS/Gateway. Check connection and API settings.")
             contract = await connector.qualify_contract(symbol)
@@ -157,29 +158,33 @@ def update_chart_on_fetch(n_clicks: int, symbol: str, duration: str, bar_size: s
             dm.load_historical_data(df_hist)
             chart_df = dm.get_data()
 
+            # --- Calculate Y-axis range for label overlap prevention ---
+            y_min = chart_df['Low'].min()
+            y_max = chart_df['High'].max()
+            y_range_tuple = (y_min, y_max) if not pd.isna(y_min) and not pd.isna(y_max) else None
+            # -----------------------------------------------------------
+
             status_messages.append(f"Calculating S/R (Confidence >= {sr_threshold:.2f})...")
-            # --- MODIFICATION HERE: Call the ML-filtered function ---
             sr_levels = calculate_sr_levels_ml_filtered(
-                chart_df,
-                confidence_threshold=sr_threshold, # Pass slider value
-                lookback=252 # Keep other params default or make them configurable later
+                chart_df, confidence_threshold=sr_threshold, lookback=252
             )
-            # ---------------------------------------------------------
             status_messages.append(f"Found {len(sr_levels['support'])} support, {len(sr_levels['resistance'])} resistance levels passing threshold.")
 
             status_messages.append("Generating chart...")
             chart_title = f"{symbol} - {bar_size} bars (S/R Confidence >= {sr_threshold:.2f})"
             fig = create_candlestick_chart(chart_df, symbol, title=chart_title)
-            add_sr_lines_to_chart(fig, sr_levels.get('support'), sr_levels.get('resistance'))
+
+            # --- Pass y_range_tuple to the plotting function ---
+            add_sr_lines_to_chart(fig, sr_levels.get('support'), sr_levels.get('resistance'), y_range=y_range_tuple)
+            # ----------------------------------------------------
 
             end_time = datetime.now(timezone.utc)
             duration_secs = (end_time - start_time).total_seconds()
             status_messages.append(f"Chart ready. Total time: {duration_secs:.2f} seconds.")
 
             data_json = chart_df.reset_index().to_json(date_format='iso', orient='split')
-            enable_interval = True # Set to True ONLY when live updates are properly implemented
+            enable_interval = True # Keep disabled until live is needed/implemented
 
-            # Use newline character for joining status messages for pre-line whitespace
             return fig, "\n".join(status_messages), symbol, data_json, enable_interval
 
     except (ConnectionError, ValueError, asyncio.TimeoutError) as e:
