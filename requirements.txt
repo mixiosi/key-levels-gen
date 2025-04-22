@@ -1,4 +1,14 @@
+# Core IB interaction
 ib_insync
+
+# Data handling
 pandas
 numpy
-asyncio
+
+# Charting and Web UI
+plotly
+dash>=2.0.0  # Ensure Dash version supports dcc/html directly
+dash-bootstrap-components # Optional, but good for layout styling
+
+# S/R Calculation (for later phases, install now)
+scipy
