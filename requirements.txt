@@ -12,3 +12,5 @@ dash-bootstrap-components # Optional, but good for layout styling
 
 # S/R Calculation (for later phases, install now)
 scipy
+scikit-learn
+joblib
