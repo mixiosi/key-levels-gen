@@ -4,6 +4,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import logging
+from typing import Optional, List # Added this import
 
 logger = logging.getLogger(__name__)
 
@@ -56,8 +57,16 @@ def create_candlestick_chart(df: pd.DataFrame, symbol: str, title: Optional[str]
                   row=1, col=1)
 
     # --- Volume Chart ---
-    fig.add_trace(go.Bar(x=df.index, y=df['Volume'], name='Volume', marker_color='rgba(100, 100, 200, 0.6)'),
-                  row=2, col=1)
+    # Ensure 'Volume' column exists before adding trace
+    if 'Volume' in df.columns:
+        fig.add_trace(go.Bar(x=df.index, y=df['Volume'], name='Volume', marker_color='rgba(100, 100, 200, 0.6)'),
+                      row=2, col=1)
+        # Update y-axis for volume only if it was added
+        fig.update_yaxes(title_text="Volume", row=2, col=1)
+    else:
+         logger.warning(f"Volume data missing for {symbol}, skipping volume plot.")
+         # Adjust layout if volume isn't plotted (e.g., remove the second row)
+         # For simplicity now, we leave the space but don't plot.
 
     # --- Layout ---
     fig.update_layout(
@@ -71,9 +80,6 @@ def create_candlestick_chart(df: pd.DataFrame, symbol: str, title: Optional[str]
         height=600 # Adjust height as needed
     )
 
-    # Update y-axis for volume
-    fig.update_yaxes(title_text="Volume", row=2, col=1)
-    # Ensure date/time axis formats nicely
     # fig.update_xaxes(type='category') # Sometimes helps with gaps, but messes up zooming
 
     logger.info(f"Created chart for {symbol} with {len(df)} bars.")
@@ -82,19 +88,42 @@ def create_candlestick_chart(df: pd.DataFrame, symbol: str, title: Optional[str]
 # --- Placeholder for S/R lines (Phase 4) ---
 def add_sr_lines_to_chart(fig: go.Figure, support_levels: Optional[List[float]], resistance_levels: Optional[List[float]]):
     """Adds horizontal support and resistance lines to the figure."""
-    if not fig or not (support_levels or resistance_levels):
-        return # Nothing to add or no figure
+    if not fig or not hasattr(fig, 'data') or not fig.data:
+         logger.warning("Cannot add S/R lines: Figure object is invalid or has no data.")
+         return # Cannot add lines if figure is empty or invalid
 
-    min_x = fig.data[0].x[0] if fig.data and len(fig.data[0].x) > 0 else 0
-    max_x = fig.data[0].x[-1] if fig.data and len(fig.data[0].x) > 0 else 1
+    if not (support_levels or resistance_levels):
+        return # Nothing to add
+
+    # Determine x-axis range from existing data
+    min_x = None
+    max_x = None
+    if fig.data[0].x is not None and len(fig.data[0].x) > 0:
+        # Handle potential numpy arrays or lists
+        x_data = pd.Series(fig.data[0].x) # Convert to series for easier min/max
+        min_x = x_data.min()
+        max_x = x_data.max()
+
+    if min_x is None or max_x is None:
+        logger.warning("Cannot determine x-axis range for S/R lines.")
+        # Fallback range or skip adding lines
+        min_x = 0
+        max_x = 1 # Default fallback - lines might look wrong
 
     shapes = []
+    # Add existing shapes first if any
+    if fig.layout.shapes:
+         shapes.extend(fig.layout.shapes)
+
+    line_width = 1
+    opacity = 0.7
+
     if support_levels:
         for level in support_levels:
             shapes.append(go.layout.Shape(
                 type="line", xref="x", yref="y",
                 x0=min_x, y0=level, x1=max_x, y1=level,
-                line=dict(color="green", width=1, dash="dash"),
+                line=dict(color="rgba(0, 200, 0, {opacity})", width=line_width, dash="dash"), # Green with opacity
                 name=f"Support {level:.2f}" # Name might not show directly
             ))
     if resistance_levels:
@@ -102,7 +131,7 @@ def add_sr_lines_to_chart(fig: go.Figure, support_levels: Optional[List[float]],
             shapes.append(go.layout.Shape(
                 type="line", xref="x", yref="y",
                 x0=min_x, y0=level, x1=max_x, y1=level,
-                line=dict(color="red", width=1, dash="dash"),
+                line=dict(color=f"rgba(255, 0, 0, {opacity})", width=line_width, dash="dash"), # Red with opacity
                 name=f"Resistance {level:.2f}"
             ))
 
