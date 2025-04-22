@@ -244,4 +244,4 @@ if __name__ == '__main__':
     logger.info(f"Starting {APP_TITLE}...")
     # Set debug=False for production/stable use
     # Set debug=True for development (enables hot-reloading, but runs things twice sometimes)
-    app.run_server(debug=False, host='127.0.0.1', port=8050)
+    app.run(debug=False, host='127.0.0.1', port=8050)
