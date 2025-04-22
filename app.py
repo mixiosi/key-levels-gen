@@ -1,11 +1,12 @@
 # app.py
 
 import dash
+# Make sure dcc is imported directly if not already
 from dash import dcc, html, Input, Output, State, no_update
-import dash_bootstrap_components as dbc # Optional: for better styling
+import dash_bootstrap_components as dbc
 import plotly.graph_objects as go
 import pandas as pd
-import asyncio # Required for running async ib_connector methods
+import asyncio
 import logging
 from datetime import datetime
 
@@ -13,70 +14,102 @@ from datetime import datetime
 from config import APP_TITLE, DEFAULT_SYMBOL, DEFAULT_HIST_DURATION, DEFAULT_HIST_BARSIZE, LIVE_UPDATE_INTERVAL_MS
 from ib_connector import IBConnector
 from data_manager import DataManager
-from charting import create_candlestick_chart, add_sr_lines_to_chart # Import S/R adder
-from sr_calculator import calculate_sr_levels_peaks # Import S/R calculator
+from charting import create_candlestick_chart, add_sr_lines_to_chart
+from sr_calculator import calculate_sr_levels_peaks
 
 # --- Global Variables & Setup ---
-# Basic logging configuration
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# Initialize IBConnector and DataManager instances globally?
-# Pros: Maintain connection across callbacks.
-# Cons: Global state can be tricky; need careful management.
-# Alternative: Create/destroy within callbacks (simpler for now, less efficient).
-# Let's start with creating within callbacks for simplicity.
-
 # Initialize Dash App
-# Use Bootstrap themes for better appearance
 app = dash.Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP])
 app.title = APP_TITLE
+
+# --- Define Dropdown Options ---
+duration_options = [
+    {'label': '5 Days', 'value': '5 D'},
+    {'label': '10 Days', 'value': '10 D'},
+    {'label': '1 Month', 'value': '1 M'},
+    {'label': '3 Months', 'value': '3 M'},
+    {'label': '6 Months', 'value': '6 M'},
+    {'label': '1 Year', 'value': '1 Y'},
+    {'label': '2 Years', 'value': '2 Y'},
+    {'label': '5 Years', 'value': '5 Y'},
+]
+
+barsize_options = [
+    {'label': '1 Minute', 'value': '1 min'},
+    {'label': '5 Minutes', 'value': '5 mins'},
+    {'label': '15 Minutes', 'value': '15 mins'},
+    {'label': '30 Minutes', 'value': '30 mins'},
+    {'label': '1 Hour', 'value': '1 hour'},
+    {'label': '4 Hours', 'value': '4 hours'},
+    {'label': '1 Day', 'value': '1 day'},
+    {'label': '1 Week', 'value': '1 week'},
+    # Note: IB has limitations on combining very small barsizes with long durations
+]
 
 # --- Dash App Layout ---
 app.layout = dbc.Container([
     dbc.Row(dbc.Col(html.H1(APP_TITLE), width=12)),
 
     dbc.Row([
+        # Symbol Input (remains dbc.Input)
         dbc.Col([
             dbc.Label("Stock Symbol:"),
-            dbc.Input(id='symbol-input', type='text', value=DEFAULT_SYMBOL, debounce=True), # Debounce waits for user to stop typing
+            dbc.Input(id='symbol-input', type='text', value=DEFAULT_SYMBOL, debounce=True),
         ], width=2),
-         dbc.Col([
+
+        # History Duration Dropdown
+        dbc.Col([
             dbc.Label("History Duration:"),
-            dbc.Input(id='duration-input', type='text', value=DEFAULT_HIST_DURATION),
+            dcc.Dropdown(
+                id='duration-input', # Keep the same ID
+                options=duration_options,
+                value=DEFAULT_HIST_DURATION, # Default value from config
+                clearable=False, # Prevent user from clearing selection
+                searchable=False # Not really needed for this short list
+            ),
         ], width=2),
+
+        # Bar Size Dropdown
         dbc.Col([
             dbc.Label("Bar Size:"),
-            # Consider using dcc.Dropdown for predefined choices later
-            dbc.Input(id='barsize-input', type='text', value=DEFAULT_HIST_BARSIZE),
+            dcc.Dropdown(
+                id='barsize-input', # Keep the same ID
+                options=barsize_options,
+                value=DEFAULT_HIST_BARSIZE, # Default value from config
+                clearable=False,
+                searchable=False
+            ),
         ], width=2),
-         dbc.Col([
-            dbc.Button("Fetch Data & Draw Chart", id='fetch-button', n_clicks=0, color="primary"),
-        ], width=2, align="end"), # Align button to bottom of its column
-    ], className="mb-3 align-items-end"), # Use margin bottom and align items
 
-    dbc.Row(dbc.Col(dcc.Loading( # Wrap Graph in Loading component
+        # Fetch Button
+        dbc.Col([
+            # Add a Div to push the button down if Label height differs from Dropdown height
+            html.Div(style={'marginTop': '28px'}), # Adjust px value as needed for alignment
+            dbc.Button("Fetch Data & Draw Chart", id='fetch-button', n_clicks=0, color="primary"),
+        ], width=2), # Removed align="end" as Dropdowns handle vertical space differently
+
+    ], className="mb-3 align-items-start"), # Align items to start might look better with dropdowns
+
+    dbc.Row(dbc.Col(dcc.Loading(
         id="loading-chart",
         children=[dcc.Graph(id='price-chart')],
-        type="circle", # or "graph", "cube", "dot"
+        type="circle",
     ), width=12)),
 
     dbc.Row(dbc.Col(html.Div(id='status-output', style={'marginTop': '15px'}), width=12)),
 
-    # Hidden div to store the current symbol being displayed (for potential refresh logic)
     dcc.Store(id='current-symbol-store'),
-    # Hidden div to store the loaded data as JSON (alternative to global DataManager)
-    # Be cautious with large data amounts here.
     dcc.Store(id='price-data-store'),
-
-    # Interval component for future live updates (initially disabled or long interval)
     dcc.Interval(
         id='interval-component',
-        interval=LIVE_UPDATE_INTERVAL_MS, # Configurable interval
+        interval=LIVE_UPDATE_INTERVAL_MS,
         n_intervals=0,
-        disabled=True # Disable initially, enable after first fetch if live needed
+        disabled=True
     )
-], fluid=True) # Use fluid container for full width
+], fluid=True)
 
 # --- Dash Callbacks ---
 
@@ -85,17 +118,18 @@ app.layout = dbc.Container([
      Output('status-output', 'children'),
      Output('current-symbol-store', 'data'),
      Output('price-data-store', 'data'),
-     Output('interval-component', 'disabled')], # Control interval timer
+     Output('interval-component', 'disabled')],
     [Input('fetch-button', 'n_clicks')],
     [State('symbol-input', 'value'),
-     State('duration-input', 'value'),
-     State('barsize-input', 'value')],
-    prevent_initial_call=True # Don't run on page load
+     State('duration-input', 'value'), # Reads value from the dropdown
+     State('barsize-input', 'value')],  # Reads value from the dropdown
+    prevent_initial_call=True
 )
 def update_chart_on_fetch(n_clicks, symbol, duration, bar_size):
     """
     Callback triggered when the fetch button is clicked.
     Connects to IB, fetches historical data, calculates S/R, creates chart.
+    (No changes needed inside the function itself)
     """
     if not symbol:
         return no_update, "Please enter a stock symbol.", no_update, no_update, True
@@ -111,12 +145,8 @@ def update_chart_on_fetch(n_clicks, symbol, duration, bar_size):
 
     try:
         # --- Connect and Fetch Data ---
-        # Create connector instance within the callback context
-        # NOTE: This connects/disconnects on every click - inefficient but avoids complex state management for now.
-        connector = IBConnector() # Uses config settings
+        connector = IBConnector()
 
-        # Run async connection and data fetching within the sync callback context
-        # IMPORTANT: This blocks the Dash worker until complete!
         async def fetch_async():
             await connector.connect()
             if not connector.is_connected:
@@ -126,69 +156,54 @@ def update_chart_on_fetch(n_clicks, symbol, duration, bar_size):
             if not contract:
                  raise ValueError(f"Could not qualify contract for {symbol}.")
 
-            # Fetch historical data
             df = await connector.fetch_historical_data(
                 contract=contract,
-                duration_str=duration,
-                bar_size_setting=bar_size
-                # Use RTH=True is default in connector method
+                duration_str=duration, # Value comes directly from dropdown state
+                bar_size_setting=bar_size # Value comes directly from dropdown state
             )
-            # Disconnect when done with this fetch
             await connector.disconnect()
             return df
 
-        # Run the async part
         df_hist = asyncio.run(fetch_async())
 
         if df_hist is None:
-            # Error occurred during fetch (logged in connector)
             raise ConnectionError(f"Failed to fetch historical data for {symbol}. Check logs.")
         elif df_hist.empty:
             status_messages.append(f"No historical data found for {symbol} with specified parameters.")
-            empty_fig = create_candlestick_chart(df_hist, symbol) # Will show "No Data" message
-            return empty_fig, html.Div(status_messages), symbol, None, True # Disable interval
+            empty_fig = create_candlestick_chart(pd.DataFrame(), symbol, title=f"{symbol} - No Data")
+            return empty_fig, html.Ul([html.Li(msg) for msg in status_messages]), symbol, None, True
         else:
             status_messages.append(f"Successfully fetched {len(df_hist)} bars.")
 
             # --- Process Data & Create Chart ---
-            # Load into a temporary DataManager instance (or just use df_hist directly)
             dm = DataManager(symbol)
             dm.load_historical_data(df_hist)
-            chart_df = dm.get_data() # Get a copy
+            chart_df = dm.get_data()
 
-            # Calculate S/R Levels (Phase 3 integration)
             status_messages.append("Calculating Support/Resistance...")
-            sr_levels = calculate_sr_levels_peaks(chart_df, lookback=200) # Lookback last 200 bars
+            sr_levels = calculate_sr_levels_peaks(chart_df, lookback=200)
             status_messages.append(f"Found {len(sr_levels['support'])} support, {len(sr_levels['resistance'])} resistance levels.")
 
-            # Create the chart
             status_messages.append("Generating chart...")
             fig = create_candlestick_chart(chart_df, symbol)
-
-            # Add S/R lines (Phase 4 integration)
             add_sr_lines_to_chart(fig, sr_levels.get('support'), sr_levels.get('resistance'))
 
             end_time = datetime.now()
             duration_secs = (end_time - start_time).total_seconds()
             status_messages.append(f"Chart ready. Total time: {duration_secs:.2f} seconds.")
 
-            # Store data (optional, consider size limits)
-            # Convert df to JSON for storage
             data_json = chart_df.reset_index().to_json(date_format='iso', orient='split')
-
-            # Enable interval timer for potential live updates later?
-            enable_interval = False # Keep disabled for now
+            enable_interval = False
 
             return fig, html.Ul([html.Li(msg) for msg in status_messages]), symbol, data_json, enable_interval
 
     except (ConnectionError, ValueError, asyncio.TimeoutError) as e:
-        logger.error(f"Error during chart update for {symbol}: {e}", exc_info=True)
+        logger.error(f"Error during chart update for {symbol}: {e}", exc_info=False) # Show concise error in UI
         error_message = f"Error processing {symbol}: {e}"
-        # Return an empty chart and the error message
         empty_fig = create_candlestick_chart(pd.DataFrame(), symbol, title=f"Error loading {symbol}")
-        return empty_fig, error_message, symbol, None, True # Keep interval disabled on error
+        return empty_fig, error_message, symbol, None, True
     except Exception as e:
-        logger.exception(f"An unexpected error occurred for {symbol}: {e}") # Log full traceback
+        logger.exception(f"An unexpected error occurred for {symbol}: {e}")
         error_message = f"An unexpected error occurred for {symbol}. Check logs."
         empty_fig = create_candlestick_chart(pd.DataFrame(), symbol, title=f"Error loading {symbol}")
         return empty_fig, error_message, symbol, None, True
@@ -237,11 +252,7 @@ def update_chart_on_fetch(n_clicks, symbol, duration, bar_size):
 #          logger.error(f"Error during live update: {e}")
 #          return no_update # Avoid breaking the chart on interval error
 
-
 # --- Run the App ---
 if __name__ == '__main__':
-    # IMPORTANT: Ensure TWS/Gateway is running and API connection is enabled!
     logger.info(f"Starting {APP_TITLE}...")
-    # Set debug=False for production/stable use
-    # Set debug=True for development (enables hot-reloading, but runs things twice sometimes)
     app.run(debug=False, host='127.0.0.1', port=8050)
