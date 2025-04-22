@@ -123,7 +123,7 @@ def add_sr_lines_to_chart(fig: go.Figure, support_levels: Optional[List[float]],
             shapes.append(go.layout.Shape(
                 type="line", xref="x", yref="y",
                 x0=min_x, y0=level, x1=max_x, y1=level,
-                line=dict(color="rgba(0, 200, 0, {opacity})", width=line_width, dash="dash"), # Green with opacity
+                line=dict(color=f"rgba(0, 200, 0, {opacity})", width=line_width, dash="dash"), # CORRECTED: Added f prefix dash="dash"), # Green with opacity
                 name=f"Support {level:.2f}" # Name might not show directly
             ))
     if resistance_levels:
@@ -131,7 +131,7 @@ def add_sr_lines_to_chart(fig: go.Figure, support_levels: Optional[List[float]],
             shapes.append(go.layout.Shape(
                 type="line", xref="x", yref="y",
                 x0=min_x, y0=level, x1=max_x, y1=level,
-                line=dict(color=f"rgba(255, 0, 0, {opacity})", width=line_width, dash="dash"), # Red with opacity
+                line=dict(color=f"rgba(255, 0, 0, {opacity})", width=line_width, dash="dash"), # This one was likely correct already dash="dash"), # Red with opacity
                 name=f"Resistance {level:.2f}"
             ))
 
