@@ -1,0 +1,66 @@
+//@version=5
+indicator(title="External S/R Levels", shorttitle="Ext S/R", overlay=true, max_lines_count = 50) // Increase max_lines if needed
+
+// --- Inputs ---
+// Use 'input.string' to accept the comma-separated list of prices
+string supportLevelsStr   = input.string(defval="", title="Support Levels (CSV)", group="Levels")
+string resistanceLevelsStr = input.string(defval="", title="Resistance Levels (CSV)", group="Levels")
+
+// --- Style Inputs ---
+color supportColor      = input.color(color.new(color.lime, 0), title="Support Color", group="Style", inline="sup")
+int   supportWidth      = input.int(1, title="Width", minval=1, maxval=5, group="Style", inline="sup")
+string supportStyleStr  = input.string(line.style_solid, title="Style", options=[line.style_solid, line.style_dashed, line.style_dotted], group="Style", inline="sup")
+
+color resistanceColor   = input.color(color.new(color.red, 0), title="Resistance Color", group="Style", inline="res")
+int   resistanceWidth   = input.int(1, title="Width", minval=1, maxval=5, group="Style", inline="res")
+string resistanceStyleStr = input.string(line.style_solid, title="Style", options=[line.style_solid, line.style_dashed, line.style_dotted], group="Style", inline="res")
+
+// --- Helper Function to get Line Style ---
+getLineStyle(string styleStr) =>
+    style = line.style_solid // Default
+    if styleStr == line.style_dashed
+        style := line.style_dashed
+    else if styleStr == line.style_dotted
+        style := line.style_dotted
+    style // Return the selected style
+
+
+// --- Processing and Plotting ---
+var line[] supportLines = array.new_line()
+var line[] resistanceLines = array.new_line()
+
+// Function to draw lines from a comma-separated string
+drawLevelsFromString(string levelsStr, color lineColor, int lineWidth, string lineStyleStr, var line[] lineArray) =>
+    if str.length(levelsStr) > 0 // Only process if the string is not empty
+        string[] levelStrings = str.split(levelsStr, ",") // Split CSV string into an array of strings
+        lineStyle = getLineStyle(lineStyleStr)
+
+        // Clear previous lines of this type to avoid duplicates on settings change
+        if array.size(lineArray) > 0
+            for i = 0 to array.size(lineArray) - 1
+                line.delete(array.get(lineArray, i))
+            array.clear(lineArray)
+
+        // Draw new lines
+        for levelStr in levelStrings
+            float level = str.tonumber(levelStr) // Convert string price to float
+            if not na(level) // Check if conversion was successful
+                // Draw a horizontal line using plot or hline (hline is simpler for static levels)
+                // Using line.new for better control and ability to delete/update
+                newLine = line.new(bar_index[1], level, bar_index, level, extend=extend.both, color=lineColor, style=lineStyle, width=lineWidth)
+                array.push(lineArray, newLine) // Store the line reference
+
+// --- Draw the lines on every bar update (required for Pine Script) ---
+// We use 'var' for the line arrays so they persist across bars.
+// The drawing logic runs only when the input strings change effectively,
+// because we clear and redraw based on the current input values.
+if barstate.islastconfirmedhistory or barstate.isrealtime // Optimization: only process on last bar or real-time updates
+    // Only redraw if the input strings have actually changed (or on the first run)
+    // Note: Pine doesn't have a direct 'on input change' trigger, this check is implicit
+    // because the script reruns with new inputs when settings are changed.
+    drawLevelsFromString(supportLevelsStr, supportColor, supportWidth, supportStyleStr, supportLines)
+    drawLevelsFromString(resistanceLevelsStr, resistanceColor, resistanceWidth, resistanceStyleStr, resistanceLines)
+
+// Keep plots or lines updated (Plotting something ensures the script runs)
+// We used line.new above which persists, so no explicit plot() needed here unless
+// you wanted labels or other dynamic elements based on the levels.
